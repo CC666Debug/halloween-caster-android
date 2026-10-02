@@ -190,12 +190,14 @@ class MainActivity : AppCompatActivity() {
         session = s
         s.remoteMediaClient?.registerCallback(mediaCallback)
         s.addCastListener(volumeListener)
+        CastKeepAliveService.start(this, s.castDevice?.friendlyName)   // keeps the app (and the speaker) alive when swiped away
     }
 
     private fun detach() {
         session?.remoteMediaClient?.unregisterCallback(mediaCallback)
         session?.removeCastListener(volumeListener)
         session = null
+        CastKeepAliveService.stop(this)
     }
 
     private val sessionListener = object : SessionManagerListener<CastSession> {

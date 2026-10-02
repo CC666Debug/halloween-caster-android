@@ -27,10 +27,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- Google's casting notification, run as a media-playback service: while casting, Android keeps the app
-             alive like a music player, so swiping the app away doesn't kill it (and with it, the speaker). -->
+        <!-- Runs only while casting, so Android keeps the app alive (and the speaker playing) when it's swiped away. -->
         <service
-            android:name="com.google.android.gms.cast.framework.media.MediaNotificationService"
+            android:name=".CastKeepAliveService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
