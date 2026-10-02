@@ -25,5 +25,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Lets Android's own media output picker and volume panel see the speaker (the slider like YouTube Music's). -->
+        <receiver
+            android:name="androidx.mediarouter.media.MediaTransferReceiver"
+            android:exported="true" />
     </application>
 </manifest>

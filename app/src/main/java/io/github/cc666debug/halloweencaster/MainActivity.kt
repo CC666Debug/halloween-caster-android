@@ -3,6 +3,9 @@ package io.github.cc666debug.halloweencaster
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +20,8 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.mediarouter.app.MediaRouteChooserDialog
 import androidx.mediarouter.app.MediaRouteControllerDialog
+import androidx.mediarouter.media.MediaRouter
+import androidx.mediarouter.media.MediaRouterParams
 import com.google.android.gms.cast.Cast
 import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaLoadRequestData
@@ -49,6 +54,11 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         castContext = CastContext.getSharedInstance(this)
+        // Android's output picker and volume panel can show and control the speaker.
+        MediaRouter.getInstance(this).setRouterParams(MediaRouterParams.Builder().setOutputSwitcherEnabled(true).build())
+        // Android 13+ only shows the speaker's media notification (and its controls) with this permission; asked once.
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
 
         web = WebView(this)
         setContentView(web)
