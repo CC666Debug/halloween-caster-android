@@ -14,7 +14,8 @@ class CastOptionsProvider : OptionsProvider {
         CastOptions.Builder()
             .setReceiverApplicationId(CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID)
             .setResumeSavedSession(true)
-            .setStopReceiverApplicationWhenEndingSession(true)
+            // Closing the app leaves the speaker playing (like YouTube Music); the app's ✕ and "Stop casting" still stop it.
+            .setStopReceiverApplicationWhenEndingSession(false)
             // A media session and notification for the speaker: Android's volume panel shows the speaker's slider,
             // and there are controls on the lock screen. Tapping the notification opens the app.
             .setCastMediaOptions(
