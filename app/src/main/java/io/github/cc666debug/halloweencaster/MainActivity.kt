@@ -6,6 +6,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.view.KeyEvent
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -74,6 +76,32 @@ class MainActivity : AppCompatActivity() {
         })
 
         web.loadUrl(APP_URL)
+    }
+
+    // ── Phone volume keys ───────────────────────────
+
+    // While casting, the volume keys turn the speaker up and down (like YouTube Music), 5% a press.
+    // Quick repeated presses build on the level we just asked for, not on the speaker's slower report.
+    private var keyVolume = 0.0
+    private var keyVolumeAt = 0L
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val up = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP
+        val s = session
+        if ((up || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) && s != null && s.isConnected) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                val now = SystemClock.uptimeMillis()
+                val base = if (now - keyVolumeAt < 1500) keyVolume else s.volume
+                keyVolume = (Math.round(base * 20) + if (up) 1 else -1).coerceIn(0, 20) / 20.0
+                keyVolumeAt = now
+                try {
+                    if (s.isMute && up) s.isMute = false
+                    s.volume = keyVolume
+                } catch (e: Exception) {}
+            }
+            return true   // the phone's own volume stays where it is
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onDestroy() {
