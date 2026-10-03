@@ -173,7 +173,7 @@ class MainActivity : AppCompatActivity() {
         }
         send(JSONObject().put("type", "status")
             .put("media", media ?: JSONObject.NULL)
-            .put("volume", s.volume)
+            .put("volume", if (s.isConnected) s.volume else JSONObject.NULL)
             .put("muted", s.isMute))
     }
 
@@ -239,7 +239,8 @@ class MainActivity : AppCompatActivity() {
         /** The page is loaded: tell it where things stand, and rejoin a speaker that's still going. */
         @JavascriptInterface fun ready() = main.post {
             sendCastState()
-            castContext.sessionManager.currentCastSession?.let {
+            // Only rejoin a speaker that's fully connected; one still reconnecting reports in onSessionResumed.
+            castContext.sessionManager.currentCastSession?.takeIf { it.isConnected }?.let {
                 attach(it)
                 sendSession("SESSION_RESUMED", it)
                 sendStatus()
