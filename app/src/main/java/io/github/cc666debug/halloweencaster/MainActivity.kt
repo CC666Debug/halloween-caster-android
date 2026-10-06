@@ -6,7 +6,12 @@ import android.net.Uri
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.content.ContentValues
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
+import android.webkit.ValueCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -50,6 +55,12 @@ class MainActivity : AppCompatActivity() {
     private var session: CastSession? = null
     private var pickId = 0   // the page's open "pick a speaker" request, if any
 
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private val pickFile = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        fileCallback?.onReceiveValue(if (uri != null) arrayOf(uri) else null)
+        fileCallback = null
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,7 +76,14 @@ class MainActivity : AppCompatActivity() {
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         web.settings.mediaPlaybackRequiresUserGesture = false
-        web.webChromeClient = WebChromeClient()
+        web.webChromeClient = object : WebChromeClient() {
+            // "Restore" in Favorites: let the page pick a backup file.
+            override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
+                fileCallback?.onReceiveValue(null)
+                fileCallback = callback
+                return try { pickFile.launch("*/*"); true } catch (e: Exception) { fileCallback = null; false }
+            }
+        }
         web.webViewClient = object : WebViewClient() {
             // Links to other sites (Halloween Radio, YouTube, Spotify...) open in their own apps.
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -235,6 +253,20 @@ class MainActivity : AppCompatActivity() {
 
     private inner class Bridge {
         private fun json(args: String) = try { JSONObject(args) } catch (e: Exception) { JSONObject() }
+
+        /** "Back up" in Favorites: write the file to the phone's Downloads folder. */
+        @JavascriptInterface fun saveFile(name: String, text: String): Boolean {
+            if (Build.VERSION.SDK_INT < 29) return false
+            return try {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, name)
+                    put(MediaStore.Downloads.MIME_TYPE, "text/markdown")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
+                contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) } != null
+            } catch (e: Exception) { false }
+        }
 
         /** The page is loaded: tell it where things stand, and rejoin a speaker that's still going. */
         @JavascriptInterface fun ready() = main.post {
