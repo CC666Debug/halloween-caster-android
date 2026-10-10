@@ -304,6 +304,16 @@ class MainActivity : AppCompatActivity() {
     private inner class Bridge {
         private fun json(args: String) = try { JSONObject(args) } catch (e: Exception) { JSONObject() }
 
+        /** "Share" at the bottom of the page: the phone's share menu (a WebView has no navigator.share). */
+        @JavascriptInterface fun shareText(title: String, text: String) = main.post {
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, title)
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            startActivity(Intent.createChooser(send, title))
+        }
+
         /** "Back up" in Favorites: write the file to the phone's Downloads folder. */
         @JavascriptInterface fun saveFile(name: String, text: String): Boolean {
             if (Build.VERSION.SDK_INT < 29) return false
