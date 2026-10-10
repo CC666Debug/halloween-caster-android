@@ -93,12 +93,7 @@ class MainActivity : AppCompatActivity() {
             contentResolver.query(dir, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
                 if (it.moveToFirst()) folderName = it.getString(0)
             }
-            var file: Uri? = null
-            contentResolver.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree, treeId),
-                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
-                while (file == null && it.moveToNext())
-                    if (it.getString(1) == name) file = DocumentsContract.buildDocumentUriUsingTree(tree, it.getString(0))
-            }
+            val file = findFile(tree, name)
             // octet-stream keeps the name exactly as given (no extra extension added)
             val target = file ?: DocumentsContract.createDocument(contentResolver, dir, "application/octet-stream", name)
                 ?: throw Exception("couldn't create the file")
@@ -109,6 +104,16 @@ class MainActivity : AppCompatActivity() {
             if (remembered) { prefs.edit().remove("folder").apply(); askForFolder(name, text) }
             else sendBackup(false, name, "error")
         }
+    }
+
+    /** The file with this name in the folder, or null. */
+    private fun findFile(tree: Uri, name: String): Uri? {
+        val treeId = DocumentsContract.getTreeDocumentId(tree)
+        contentResolver.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree, treeId),
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
+            while (it.moveToNext()) if (it.getString(1) == name) return DocumentsContract.buildDocumentUriUsingTree(tree, it.getString(0))
+        }
+        return null
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -303,6 +308,25 @@ class MainActivity : AppCompatActivity() {
 
     private inner class Bridge {
         private fun json(args: String) = try { JSONObject(args) } catch (e: Exception) { JSONObject() }
+
+        /** Heart taps: read a master list in the backup folder ("" when it isn't there yet). Never asks for a folder. */
+        @JavascriptInterface fun readSaved(name: String): String {
+            val tree = prefs.getString("folder", null)?.let { Uri.parse(it) } ?: return JSONObject().put("ok", false).put("error", "no backup folder yet").toString()
+            return try {
+                val text = findFile(tree, name)?.let { f -> contentResolver.openInputStream(f)?.use { it.readBytes().toString(Charsets.UTF_8) } } ?: ""
+                JSONObject().put("ok", true).put("text", text).toString()
+            } catch (e: Exception) { JSONObject().put("ok", false).put("error", e.message ?: "couldn't read").toString() }
+        }
+
+        /** Heart taps: write a master list into the backup folder, replacing the old one. */
+        @JavascriptInterface fun writeSaved(name: String, text: String): Boolean {
+            val tree = prefs.getString("folder", null)?.let { Uri.parse(it) } ?: return false
+            return try {
+                val dir = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+                val target = findFile(tree, name) ?: DocumentsContract.createDocument(contentResolver, dir, "application/octet-stream", name) ?: return false
+                contentResolver.openOutputStream(target, "wt")?.use { it.write(text.toByteArray()) } != null
+            } catch (e: Exception) { false }
+        }
 
         /** "Share" at the bottom of the page: the phone's share menu (a WebView has no navigator.share). */
         @JavascriptInterface fun shareText(title: String, text: String) = main.post {
