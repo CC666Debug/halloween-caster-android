@@ -9,6 +9,7 @@ import android.os.Build
 import android.content.ContentValues
 import android.os.Bundle
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.webkit.ValueCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -59,6 +60,55 @@ class MainActivity : AppCompatActivity() {
     private val pickFile = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         fileCallback?.onReceiveValue(if (uri != null) arrayOf(uri) else null)
         fileCallback = null
+    }
+
+    // "Back up": the first time, pick a folder; later backups go straight there (📁 Folder picks another).
+    private val prefs by lazy { getSharedPreferences("backup", MODE_PRIVATE) }
+    private var pendingBackup: Pair<String, String>? = null
+    private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        val b = pendingBackup ?: return@registerForActivityResult
+        pendingBackup = null
+        if (uri == null) { sendBackup(false, b.first, "cancel"); return@registerForActivityResult }
+        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) } catch (e: Exception) {}
+        prefs.edit().putString("folder", uri.toString()).apply()
+        writeBackup(uri, b.first, b.second, false)
+    }
+
+    private fun askForFolder(name: String, text: String) {
+        pendingBackup = name to text
+        try { pickFolder.launch(null) } catch (e: Exception) { pendingBackup = null; sendBackup(false, name, "error") }
+    }
+
+    private fun sendBackup(ok: Boolean, name: String, where: String) = main.post {
+        val r = JSONObject().put("ok", ok).put("name", name).put("where", where)
+        web.evaluateJavascript("window.onAndroidBackup && window.onAndroidBackup($r)", null)
+    }
+
+    /** Writes the file into the folder, replacing one with the same name (so no "(1)" copies). */
+    private fun writeBackup(tree: Uri, name: String, text: String, remembered: Boolean) {
+        try {
+            val treeId = DocumentsContract.getTreeDocumentId(tree)
+            val dir = DocumentsContract.buildDocumentUriUsingTree(tree, treeId)
+            var folderName = "your folder"
+            contentResolver.query(dir, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) folderName = it.getString(0)
+            }
+            var file: Uri? = null
+            contentResolver.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree, treeId),
+                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
+                while (file == null && it.moveToNext())
+                    if (it.getString(1) == name) file = DocumentsContract.buildDocumentUriUsingTree(tree, it.getString(0))
+            }
+            // octet-stream keeps the name exactly as given (no extra extension added)
+            val target = file ?: DocumentsContract.createDocument(contentResolver, dir, "application/octet-stream", name)
+                ?: throw Exception("couldn't create the file")
+            contentResolver.openOutputStream(target, "wt")?.use { it.write(text.toByteArray()) } ?: throw Exception("couldn't open the file")
+            sendBackup(true, name, folderName)
+        } catch (e: Exception) {
+            // The remembered folder is gone or no longer allowed: ask for one again.
+            if (remembered) { prefs.edit().remove("folder").apply(); askForFolder(name, text) }
+            else sendBackup(false, name, "error")
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -266,6 +316,13 @@ class MainActivity : AppCompatActivity() {
                 val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
                 contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) } != null
             } catch (e: Exception) { false }
+        }
+
+        /** "Back up" with a folder: asks for one the first time (or when pickNew), then saves there; answers through onAndroidBackup. */
+        @JavascriptInterface fun saveBackup(name: String, text: String, pickNew: Boolean) = main.post {
+            val folder = prefs.getString("folder", null)
+            if (folder != null && !pickNew) writeBackup(Uri.parse(folder), name, text, true)
+            else askForFolder(name, text)
         }
 
         /** The page is loaded: tell it where things stand, and rejoin a speaker that's still going. */
