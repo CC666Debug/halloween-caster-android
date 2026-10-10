@@ -328,6 +328,22 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) { false }
         }
 
+        /** "Back up": what the device's list file in the remembered folder already holds, so new songs are added to it. */
+        @JavascriptInterface fun readBackup(name: String): String {
+            val tree = prefs.getString("folder", null)?.let { Uri.parse(it) } ?: return JSONObject().put("ok", false).toString()
+            return try {
+                val treeId = DocumentsContract.getTreeDocumentId(tree)
+                var file: Uri? = null
+                contentResolver.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree, treeId),
+                    arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
+                    while (file == null && it.moveToNext())
+                        if (it.getString(1) == name) file = DocumentsContract.buildDocumentUriUsingTree(tree, it.getString(0))
+                }
+                val text = file?.let { f -> contentResolver.openInputStream(f)?.use { it.readBytes().toString(Charsets.UTF_8) } } ?: ""
+                JSONObject().put("ok", true).put("text", text).toString()
+            } catch (e: Exception) { JSONObject().put("ok", false).toString() }
+        }
+
         /** "Back up" with a folder: asks for one the first time (or when pickNew), then saves there; answers through onAndroidBackup. */
         @JavascriptInterface fun saveBackup(name: String, text: String, pickNew: Boolean) = main.post {
             val folder = prefs.getString("folder", null)
