@@ -44,7 +44,6 @@ jobs:
           APK_NAME: ${{ vars.APK_NAME }}
         run: |
           VER=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
-          APK_NAME="${APK_NAME%.apk}_v$VER.apk"   # the phone shows which version it is, e.g. FourRealms_v1.12.apk
           cp app/build/outputs/apk/debug/app-debug.apk "$APK_NAME"
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest "$APK_NAME" --title "Version $VER" --notes "Built from $(git rev-parse --short HEAD). Download $APK_NAME on the phone and install it over the old app."
