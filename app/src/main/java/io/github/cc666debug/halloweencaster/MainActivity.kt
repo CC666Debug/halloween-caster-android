@@ -64,17 +64,18 @@ class MainActivity : AppCompatActivity() {
 
     // "Back up": the first time, pick a folder; later backups go straight there (📁 Folder picks another).
     private val prefs by lazy { getSharedPreferences("backup", MODE_PRIVATE) }
-    private var pendingBackup: Pair<String, String>? = null
+    private var pendingBackup: Pair<String, String?>? = null   // text null = only pick the folder (pickBackupFolder)
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         val b = pendingBackup ?: return@registerForActivityResult
         pendingBackup = null
         if (uri == null) { sendBackup(false, b.first, "cancel"); return@registerForActivityResult }
         try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) } catch (e: Exception) {}
         prefs.edit().putString("folder", uri.toString()).apply()
-        writeBackup(uri, b.first, b.second, false)
+        val text = b.second
+        if (text == null) sendBackup(true, b.first, "picked") else writeBackup(uri, b.first, text, false)
     }
 
-    private fun askForFolder(name: String, text: String) {
+    private fun askForFolder(name: String, text: String?) {
         pendingBackup = name to text
         try { pickFolder.launch(null) } catch (e: Exception) { pendingBackup = null; sendBackup(false, name, "error") }
     }
@@ -343,6 +344,9 @@ class MainActivity : AppCompatActivity() {
                 JSONObject().put("ok", true).put("text", text).toString()
             } catch (e: Exception) { JSONObject().put("ok", false).toString() }
         }
+
+        /** Picks the backup folder without writing, so the page can read the list file already there first; answers through onAndroidBackup ("picked"). */
+        @JavascriptInterface fun pickBackupFolder(name: String) = main.post { askForFolder(name, null) }
 
         /** "Back up" with a folder: asks for one the first time (or when pickNew), then saves there; answers through onAndroidBackup. */
         @JavascriptInterface fun saveBackup(name: String, text: String, pickNew: Boolean) = main.post {
