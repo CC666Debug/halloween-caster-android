@@ -184,6 +184,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(giveUpSuspended)
         castContext.sessionManager.removeSessionManagerListener(sessionListener, CastSession::class.java)
         web.destroy()
         super.onDestroy()
@@ -262,6 +263,28 @@ class MainActivity : AppCompatActivity() {
         CastKeepAliveService.start(this, s.castDevice?.friendlyName)   // keeps the app (and the speaker) alive when swiped away
     }
 
+    /** Lets go of the speaker (or group) in Android's own speaker list too. Ending only the cast left the
+     *  group marked as in use by this app, so it vanished from the app's list until the phone was rebooted. */
+    private fun releaseRoute() {
+        try {
+            val router = MediaRouter.getInstance(this)
+            if (!router.selectedRoute.isDefaultOrBluetooth) router.unselect(MediaRouter.UNSELECT_REASON_STOPPED)
+            if (!router.selectedRoute.isDefaultOrBluetooth) router.selectRoute(router.defaultRoute)
+        } catch (e: Exception) {}
+    }
+
+    // A dropped speaker (Wi-Fi blip, or a speaker taken out of the group) gets a while to come back by itself;
+    // after that the cast is ended properly instead of being left hanging.
+    private val giveUpSuspended = Runnable {
+        val s = castContext.sessionManager.currentCastSession
+        if (s == null || !s.isConnected) {
+            castContext.sessionManager.endCurrentSession(true)
+            detach()
+            sendSession("SESSION_ENDED", null)
+            releaseRoute()
+        }
+    }
+
     private fun detach() {
         session?.remoteMediaClient?.unregisterCallback(mediaCallback)
         session?.removeCastListener(volumeListener)
@@ -272,6 +295,7 @@ class MainActivity : AppCompatActivity() {
     private val sessionListener = object : SessionManagerListener<CastSession> {
         override fun onSessionStarting(s: CastSession) = sendSession("SESSION_STARTING", null)
         override fun onSessionStarted(s: CastSession, sessionId: String) {
+            main.removeCallbacks(giveUpSuspended)
             attach(s)
             sendSession("SESSION_STARTED", s)
             sendResult(pickId, true); pickId = 0
@@ -281,23 +305,32 @@ class MainActivity : AppCompatActivity() {
             detach()
             sendSession("SESSION_START_FAILED", null, "session_error ($error)")
             sendResult(pickId, false, "session_error ($error)"); pickId = 0
+            releaseRoute()
         }
         override fun onSessionEnding(s: CastSession) = sendSession("SESSION_ENDING", s)
         override fun onSessionEnded(s: CastSession, error: Int) {
+            main.removeCallbacks(giveUpSuspended)
             detach()
             sendSession("SESSION_ENDED", null)
+            releaseRoute()
         }
         override fun onSessionResuming(s: CastSession, sessionId: String) {}
         override fun onSessionResumed(s: CastSession, wasSuspended: Boolean) {
+            main.removeCallbacks(giveUpSuspended)
             attach(s)
             sendSession("SESSION_RESUMED", s)
             sendStatus()
         }
         override fun onSessionResumeFailed(s: CastSession, error: Int) {
+            main.removeCallbacks(giveUpSuspended)
             detach()
             sendSession("SESSION_ENDED", null)
+            releaseRoute()
         }
-        override fun onSessionSuspended(s: CastSession, reason: Int) {}
+        override fun onSessionSuspended(s: CastSession, reason: Int) {
+            main.removeCallbacks(giveUpSuspended)
+            main.postDelayed(giveUpSuspended, 15000)
+        }
     }
 
     // ── Commands from the page ──────────────────────
@@ -436,6 +469,7 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface fun endSession(id: Int, args: String) = main.post {
             castContext.sessionManager.endCurrentSession(json(args).optBoolean("stopCasting", true))
+            releaseRoute()
             sendResult(id, true)
         }
     }
