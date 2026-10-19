@@ -264,11 +264,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Lets go of the speaker (or group) in Android's own speaker list too. Ending only the cast left the
-     *  group marked as in use by this app, so it vanished from the app's list until the phone was rebooted. */
-    private fun releaseRoute() {
+     *  group marked as in use by this app, so it vanished from the app's list until the phone was rebooted.
+     *  Only the user's own Stop lets go as "stopped": that stops the music on every speaker in the group.
+     *  When the speakers end the cast themselves (someone else changed the volume), the music keeps playing. */
+    private fun releaseRoute(stopped: Boolean) {
         try {
             val router = MediaRouter.getInstance(this)
-            if (!router.selectedRoute.isDefaultOrBluetooth) router.unselect(MediaRouter.UNSELECT_REASON_STOPPED)
+            if (!router.selectedRoute.isDefaultOrBluetooth)
+                router.unselect(if (stopped) MediaRouter.UNSELECT_REASON_STOPPED else MediaRouter.UNSELECT_REASON_DISCONNECTED)
             if (!router.selectedRoute.isDefaultOrBluetooth) router.selectRoute(router.defaultRoute)
         } catch (e: Exception) {}
     }
@@ -278,10 +281,10 @@ class MainActivity : AppCompatActivity() {
     private val giveUpSuspended = Runnable {
         val s = castContext.sessionManager.currentCastSession
         if (s == null || !s.isConnected) {
-            castContext.sessionManager.endCurrentSession(true)
+            castContext.sessionManager.endCurrentSession(false)
             detach()
-            sendSession("SESSION_ENDED", null)
-            releaseRoute()
+            sendSession("SESSION_ENDED", null, "gave up after 15s")
+            releaseRoute(false)
         }
     }
 
@@ -305,14 +308,14 @@ class MainActivity : AppCompatActivity() {
             detach()
             sendSession("SESSION_START_FAILED", null, "session_error ($error)")
             sendResult(pickId, false, "session_error ($error)"); pickId = 0
-            releaseRoute()
+            releaseRoute(false)
         }
         override fun onSessionEnding(s: CastSession) = sendSession("SESSION_ENDING", s)
         override fun onSessionEnded(s: CastSession, error: Int) {
             main.removeCallbacks(giveUpSuspended)
             detach()
-            sendSession("SESSION_ENDED", null)
-            releaseRoute()
+            sendSession("SESSION_ENDED", null, "code $error")
+            releaseRoute(false)
         }
         override fun onSessionResuming(s: CastSession, sessionId: String) {}
         override fun onSessionResumed(s: CastSession, wasSuspended: Boolean) {
@@ -324,10 +327,11 @@ class MainActivity : AppCompatActivity() {
         override fun onSessionResumeFailed(s: CastSession, error: Int) {
             main.removeCallbacks(giveUpSuspended)
             detach()
-            sendSession("SESSION_ENDED", null)
-            releaseRoute()
+            sendSession("SESSION_ENDED", null, "resume failed, code $error")
+            releaseRoute(false)
         }
         override fun onSessionSuspended(s: CastSession, reason: Int) {
+            sendSession("SESSION_SUSPENDED", s, "reason $reason")   // only for the log; the page waits for the end or the resume
             main.removeCallbacks(giveUpSuspended)
             main.postDelayed(giveUpSuspended, 15000)
         }
@@ -468,8 +472,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface fun endSession(id: Int, args: String) = main.post {
-            castContext.sessionManager.endCurrentSession(json(args).optBoolean("stopCasting", true))
-            releaseRoute()
+            val stop = json(args).optBoolean("stopCasting", true)
+            castContext.sessionManager.endCurrentSession(stop)
+            releaseRoute(stop)
             sendResult(id, true)
         }
     }
