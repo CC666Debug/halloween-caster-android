@@ -26,7 +26,6 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.mediarouter.app.MediaRouteChooserDialog
 import androidx.mediarouter.app.MediaRouteControllerDialog
-import androidx.mediarouter.app.SystemOutputSwitcherDialogController
 import androidx.mediarouter.media.MediaRouter
 import androidx.mediarouter.media.MediaRouterParams
 import com.google.android.gms.cast.Cast
@@ -56,7 +55,6 @@ class MainActivity : AppCompatActivity() {
 
     private var session: CastSession? = null
     private var pickId = 0   // the page's open "pick a speaker" request, if any
-    private var systemPickerOpen = false
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val pickFile = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -183,21 +181,6 @@ class MainActivity : AppCompatActivity() {
             return true   // the phone's own volume stays where it is
         }
         return super.dispatchKeyEvent(event)
-    }
-
-    // Android's picker doesn't say when it closes; the app getting focus back means it did.
-    // Closed with nothing connecting counts as cancelled, like the app's own list.
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (!hasFocus || !systemPickerOpen) return
-        systemPickerOpen = false
-        val id = pickId
-        main.postDelayed({
-            val st = castContext.castState
-            if (id != 0 && pickId == id && st != CastState.CONNECTING && st != CastState.CONNECTED) {
-                sendResult(id, false, "cancel"); pickId = 0
-            }
-        }, 1500)
     }
 
     override fun onDestroy() {
@@ -426,12 +409,6 @@ class MainActivity : AppCompatActivity() {
                 return@post
             }
             pickId = id
-            // Android 17+: Android's own speaker picker, as in Google's newest casting code. The app's own list
-            // lost a speaker group after a cast ended (until a reboot) while other apps still showed it.
-            if (Build.VERSION.SDK_INT >= 37 && SystemOutputSwitcherDialogController.showDialog(this@MainActivity)) {
-                systemPickerOpen = true
-                return@post
-            }
             MediaRouteChooserDialog(this@MainActivity).apply {
                 routeSelector = selector
                 // The list closes as soon as a speaker is picked; only a close with nothing

@@ -16,8 +16,6 @@ class CastOptionsProvider : OptionsProvider {
             .setResumeSavedSession(true)
             // Closing the app leaves the speaker playing (like YouTube Music); the app's ✕ and "Stop casting" still stop it.
             .setStopReceiverApplicationWhenEndingSession(false)
-            // Android 17+: picking a speaker happens in Android's own picker (see MainActivity.pickSpeaker).
-            .setShowSystemOutputSwitcherOnCastIconClick(true)
             // A media session and notification for the speaker: Android's volume panel shows the speaker's slider,
             // and there are controls on the lock screen. Tapping the notification opens the app.
             .setCastMediaOptions(
