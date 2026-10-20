@@ -293,6 +293,7 @@ class MainActivity : AppCompatActivity() {
     // Google's speaker player sometimes shuts itself down (code 2055), for example when the volume is changed in
     // Google Home. The app then reconnects to the same speaker or group by itself, and the page restarts the station.
     private var rejoinId: String? = null
+    private var rejoinName: String? = null   // the speaker/group's name: a group gets a new id for every cast
     private var rejoinUntil = 0L
     private val rejoinTick = Runnable { tryRejoin() }
     private val rejoinCallback = object : MediaRouter.Callback() {
@@ -300,8 +301,10 @@ class MainActivity : AppCompatActivity() {
         override fun onRouteChanged(router: MediaRouter, route: MediaRouter.RouteInfo) = tryRejoin()
     }
 
-    private fun startRejoin(deviceId: String) {
+    private fun startRejoin(deviceId: String, name: String?) {
         rejoinId = deviceId
+        rejoinName = name
+        sendSession("REJOIN_TRYING", null, name ?: deviceId)
         rejoinUntil = SystemClock.elapsedRealtime() + 30000
         castContext.mergedSelector?.let {
             MediaRouter.getInstance(this).addCallback(it, rejoinCallback, MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN)
@@ -321,8 +324,10 @@ class MainActivity : AppCompatActivity() {
         if (SystemClock.elapsedRealtime() > rejoinUntil) { stopRejoin(); sendSession("REJOIN_FAILED", null); return }
         val router = MediaRouter.getInstance(this)
         val route = router.routes.firstOrNull { it.isEnabled && CastDevice.getFromBundle(it.extras)?.deviceId == id }
+            ?: router.routes.firstOrNull { it.isEnabled && !it.isDefaultOrBluetooth && it.name == rejoinName }
         if (route != null && castContext.sessionManager.currentCastSession == null) {
             stopRejoin()
+            sendSession("REJOIN_FOUND", null, route.name)
             router.selectRoute(route)
             return
         }
@@ -359,7 +364,7 @@ class MainActivity : AppCompatActivity() {
             detach()
             sendSession("SESSION_ENDED", null, "code $error")
             val id = s.castDevice?.deviceId
-            if (error == 2055 && wasPlaying && id != null) startRejoin(id)
+            if (error == 2055 && wasPlaying && id != null) startRejoin(id, s.castDevice?.friendlyName)
         }
         override fun onSessionResuming(s: CastSession, sessionId: String) {}
         override fun onSessionResumed(s: CastSession, wasSuspended: Boolean) {
