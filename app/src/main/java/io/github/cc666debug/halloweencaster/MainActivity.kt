@@ -29,6 +29,7 @@ import androidx.mediarouter.app.MediaRouteControllerDialog
 import androidx.mediarouter.media.MediaRouter
 import androidx.mediarouter.media.MediaRouterParams
 import com.google.android.gms.cast.Cast
+import com.google.android.gms.cast.CastDevice
 import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaLoadRequestData
 import com.google.android.gms.cast.MediaMetadata
@@ -54,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     private val main = Handler(Looper.getMainLooper())
 
     private var session: CastSession? = null
+    private var speakerPlaying = false   // the speaker was playing or starting a stream, as last reported
     private var pickId = 0   // the page's open "pick a speaker" request, if any
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
@@ -185,6 +187,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         main.removeCallbacks(giveUpSuspended)
+        stopRejoin()
         castContext.sessionManager.removeSessionManagerListener(sessionListener, CastSession::class.java)
         web.destroy()
         super.onDestroy()
@@ -236,6 +239,7 @@ class MainActivity : AppCompatActivity() {
                 MediaStatus.IDLE_REASON_ERROR -> "ERROR"
                 else -> null
             }
+            speakerPlaying = playerState == "PLAYING" || playerState == "BUFFERING"
             JSONObject()
                 .put("playerState", playerState ?: JSONObject.NULL)
                 .put("idleReason", idleReason ?: JSONObject.NULL)
@@ -286,6 +290,46 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Google's speaker player sometimes shuts itself down (code 2055), for example when the volume is changed in
+    // Google Home. The app then reconnects to the same speaker or group by itself, and the page restarts the station.
+    private var rejoinId: String? = null
+    private var rejoinUntil = 0L
+    private val rejoinTick = Runnable { tryRejoin() }
+    private val rejoinCallback = object : MediaRouter.Callback() {
+        override fun onRouteAdded(router: MediaRouter, route: MediaRouter.RouteInfo) = tryRejoin()
+        override fun onRouteChanged(router: MediaRouter, route: MediaRouter.RouteInfo) = tryRejoin()
+    }
+
+    private fun startRejoin(deviceId: String) {
+        rejoinId = deviceId
+        rejoinUntil = SystemClock.elapsedRealtime() + 30000
+        castContext.mergedSelector?.let {
+            MediaRouter.getInstance(this).addCallback(it, rejoinCallback, MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN)
+        }
+        main.postDelayed(rejoinTick, 1500)   // let the old session finish closing first
+    }
+
+    private fun stopRejoin() {
+        if (rejoinId == null) return
+        rejoinId = null
+        main.removeCallbacks(rejoinTick)
+        MediaRouter.getInstance(this).removeCallback(rejoinCallback)
+    }
+
+    private fun tryRejoin() {
+        val id = rejoinId ?: return
+        if (SystemClock.elapsedRealtime() > rejoinUntil) { stopRejoin(); sendSession("REJOIN_FAILED", null); return }
+        val router = MediaRouter.getInstance(this)
+        val route = router.routes.firstOrNull { it.isEnabled && CastDevice.getFromBundle(it.extras)?.deviceId == id }
+        if (route != null && castContext.sessionManager.currentCastSession == null) {
+            stopRejoin()
+            router.selectRoute(route)
+            return
+        }
+        main.removeCallbacks(rejoinTick)
+        main.postDelayed(rejoinTick, 2000)
+    }
+
     private fun detach() {
         session?.remoteMediaClient?.unregisterCallback(mediaCallback)
         session?.removeCastListener(volumeListener)
@@ -294,7 +338,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val sessionListener = object : SessionManagerListener<CastSession> {
-        override fun onSessionStarting(s: CastSession) = sendSession("SESSION_STARTING", null)
+        override fun onSessionStarting(s: CastSession) { stopRejoin(); sendSession("SESSION_STARTING", null) }
         override fun onSessionStarted(s: CastSession, sessionId: String) {
             main.removeCallbacks(giveUpSuspended)
             attach(s)
@@ -310,8 +354,12 @@ class MainActivity : AppCompatActivity() {
         override fun onSessionEnding(s: CastSession) = sendSession("SESSION_ENDING", s)
         override fun onSessionEnded(s: CastSession, error: Int) {
             main.removeCallbacks(giveUpSuspended)
+            val wasPlaying = speakerPlaying
+            speakerPlaying = false
             detach()
             sendSession("SESSION_ENDED", null, "code $error")
+            val id = s.castDevice?.deviceId
+            if (error == 2055 && wasPlaying && id != null) startRejoin(id)
         }
         override fun onSessionResuming(s: CastSession, sessionId: String) {}
         override fun onSessionResumed(s: CastSession, wasSuspended: Boolean) {
