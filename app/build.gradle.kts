@@ -10,8 +10,8 @@ android {
         applicationId = "io.github.cc666debug.halloweencaster"
         minSdk = 24
         targetSdk = 35
-        versionCode = 18
-        versionName = "1.17"
+        versionCode = 19
+        versionName = "1.18"
     }
 
     compileOptions {
@@ -21,7 +21,7 @@ android {
 }
 
 dependencies {
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("androidx.mediarouter:mediarouter:1.7.0")
-    implementation("com.google.android.gms:play-services-cast-framework:21.5.0")
+    implementation("androidx.appcompat:appcompat:1.8.0")
+    implementation("androidx.mediarouter:mediarouter:1.9.0-beta01")
+    implementation("com.google.android.gms:play-services-cast-framework:23.0.0")
 }
