@@ -176,23 +176,32 @@ class MainActivity : AppCompatActivity() {
     // ── Phone volume keys ───────────────────────────
 
     // While casting, the volume keys turn the speaker up and down (like YouTube Music), 5% a press.
-    // Quick repeated presses build on the level we just asked for, not on the speaker's slower report.
-    private var keyVolume = 0.0
-    private var keyVolumeAt = 0L
+    // The speaker reports its level a beat late (groups even later), and those late reports used to show up
+    // between presses: the number jumped backwards, and the next press built on the old level. Now the level we
+    // asked for is what the page shows and what the next press builds on for VOL_HOLD after the last change;
+    // then the speaker's own level again.
+    private var wantVol = -1.0
+    private var wantAt = 0L
+    private val VOL_HOLD = 2500L
+    private fun holding() = wantVol >= 0 && SystemClock.uptimeMillis() - wantAt < VOL_HOLD
+    private fun shownVolume(s: CastSession): Double = if (holding()) wantVol else s.volume
+    private val volSettled = Runnable { sendStatus() }
+    private fun askVolume(s: CastSession, v: Double, unmute: Boolean) {
+        wantVol = v.coerceIn(0.0, 1.0); wantAt = SystemClock.uptimeMillis()
+        try {
+            if (s.isMute && unmute) s.isMute = false
+            s.volume = wantVol
+        } catch (e: Exception) {}
+        sendStatus()
+        main.removeCallbacks(volSettled); main.postDelayed(volSettled, VOL_HOLD + 150)
+    }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val up = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP
         val s = session
         if ((up || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) && s != null && s.isConnected) {
             if (event.action == KeyEvent.ACTION_DOWN) {
-                val now = SystemClock.uptimeMillis()
-                val base = if (now - keyVolumeAt < 1500) keyVolume else s.volume
-                keyVolume = (Math.round(base * 20) + if (up) 1 else -1).coerceIn(0, 20) / 20.0
-                keyVolumeAt = now
-                try {
-                    if (s.isMute && up) s.isMute = false
-                    s.volume = keyVolume
-                } catch (e: Exception) {}
+                askVolume(s, (Math.round(shownVolume(s) * 20) + if (up) 1 else -1).coerceIn(0, 20) / 20.0, up)
             }
             return true   // the phone's own volume stays where it is
         }
@@ -200,7 +209,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        main.removeCallbacks(giveUpSuspended)
+        main.removeCallbacks(giveUpSuspended); main.removeCallbacks(volSettled)
         castContext.sessionManager.removeSessionManagerListener(sessionListener, CastSession::class.java)
         web.destroy()
         super.onDestroy()
@@ -259,7 +268,7 @@ class MainActivity : AppCompatActivity() {
         }
         send(JSONObject().put("type", "status")
             .put("media", media ?: JSONObject.NULL)
-            .put("volume", if (s.isConnected) s.volume else JSONObject.NULL)
+            .put("volume", if (s.isConnected) shownVolume(s) else JSONObject.NULL)
             .put("muted", s.isMute))
     }
 
@@ -479,7 +488,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface fun setVolume(id: Int, args: String) = main.post {
-            try { session?.volume = json(args).optDouble("level", 0.5); sendResult(id, true) }
+            try { val s = session; if (s != null && s.isConnected) askVolume(s, json(args).optDouble("level", 0.5), false); sendResult(id, true) }
             catch (e: Exception) { sendResult(id, false, e.message) }
         }
 
